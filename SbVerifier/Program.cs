@@ -6,13 +6,14 @@ const string connectionString =
     "Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;";
 
 const string topic = "events";
-string[] subscriptions = ["summarizer", "audit"];
+// string[] subscriptions = ["summarizer", "audit"];
+string[] subscriptions = ["summarizer"];
 
 await using var client = new ServiceBusClient(connectionString);
 
-// --- Publish 3 messages to the topic ---
+// --- Publish messages to the topic ---
 await using var sender = client.CreateSender(topic);
-for (int i = 1; i <= 3; i++)
+for (int i = 1; i <= 10; i++)
 {
     var id = Guid.NewGuid().ToString("N")[..8];
     await sender.SendMessageAsync(new ServiceBusMessage($"event #{i} [{id}]"));
@@ -21,15 +22,28 @@ for (int i = 1; i <= 3; i++)
 
 Console.WriteLine();
 
-// --- Drain each subscription independently ---
-foreach (var sub in subscriptions)
-{
-    await using var receiver = client.CreateReceiver(topic, sub,
-        new ServiceBusReceiverOptions { ReceiveMode = ServiceBusReceiveMode.ReceiveAndDelete });
 
-    var messages = await receiver.ReceiveMessagesAsync(maxMessages: 10, maxWaitTime: TimeSpan.FromSeconds(5));
-    Console.WriteLine($"SUBSCRIPTION '{sub}' received {messages.Count} message(s):");
-    foreach (var msg in messages)
-        Console.WriteLine($"   - {msg.Body}");
-    Console.WriteLine();
+var drain1 = CreateDrainSubscriptionTask("drainer1", topic, subscriptions, client);
+var drain2 = CreateDrainSubscriptionTask("drainer2", topic, subscriptions, client);
+await Task.WhenAll(drain1, drain2);
+
+static async Task CreateDrainSubscriptionTask(string subscriber, string topic, string[] subscriptions, ServiceBusClient client)
+{
+    // --- Drain each subscription independently ---
+    foreach (var sub in subscriptions)
+    {
+        await using var receiver = client.CreateReceiver(topic, sub,
+            new ServiceBusReceiverOptions { ReceiveMode = ServiceBusReceiveMode.ReceiveAndDelete });
+
+        while (true)
+        {
+            var messages = await receiver.ReceiveMessagesAsync(maxMessages: 1, maxWaitTime: TimeSpan.FromSeconds(2));
+            if (messages.Count == 0) break;
+
+            Console.WriteLine($"[{subscriber}]: SUBSCRIPTION '{sub}' received {messages.Count} message(s):");
+            foreach (var msg in messages)
+                Console.WriteLine($"   - {msg.Body}");
+            Console.WriteLine();
+        }
+    }
 }
