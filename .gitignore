@@ -1,0 +1,40 @@
+# Secrets / local config
+.env
+*.env
+!.env.example
+
+# .NET build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+
+# .NET tooling / restore
+project.lock.json
+project.fragment.lock.json
+artifacts/
+*.user
+*.userprefs
+*.suo
+.vs/
+
+# User secrets (dotnet user-secrets)
+**/secrets.json
+
+# Rider / JetBrains
+.idea/
+*.sln.iml
+
+# VS Code
+.vscode/
+
+# macOS / Windows cruft
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
