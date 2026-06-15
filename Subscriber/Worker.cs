@@ -57,10 +57,12 @@ private async Task OnMessageAsync(ProcessMessageEventArgs args)
         return;
     }
 
-    _logger.LogInformation("Received {OrderId} from {Customer}: {Description}",
-        evt.OrderId, evt.CustomerName, evt.Description);
+    _logger.LogInformation("Received {OrderId} from {Customer} (delivery #{Count}): {Description}",
+        evt.OrderId, evt.CustomerName, args.Message.DeliveryCount, evt.Description);
 
-    // Real processing goes here. On Day 4 this becomes the AI agent.
+    // TEMP EXPERIMENT (revert after): simulate a permanent processing failure for one customer.
+    if (evt.CustomerName == "Acme Corp")
+        throw new InvalidOperationException("Simulated processing failure");
 
     await args.CompleteMessageAsync(args.Message);
     _logger.LogInformation("Completed {OrderId}", evt.OrderId);
