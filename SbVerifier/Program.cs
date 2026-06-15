@@ -1,49 +1,30 @@
 ﻿using Azure.Messaging.ServiceBus;
+using Contracts;
 
-// Emulator connection string. NOT a secret: UseDevelopmentEmulator=true tells the SDK
-// to use the well-known local dev key, so "SAS_KEY_VALUE" is literal. Safe to commit.
 const string connectionString =
     "Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;";
 
 const string topic = "events";
-// string[] subscriptions = ["summarizer", "audit"];
-string[] subscriptions = ["summarizer"];
+const string subscription = "summarizer";
 
 await using var client = new ServiceBusClient(connectionString);
 
-// --- Publish messages to the topic ---
-await using var sender = client.CreateSender(topic);
-for (int i = 1; i <= 10; i++)
+// Point the receiver at the subscription's dead-letter subqueue
+await using var receiver = client.CreateReceiver(topic, subscription, new ServiceBusReceiverOptions
 {
-    var id = Guid.NewGuid().ToString("N")[..8];
-    await sender.SendMessageAsync(new ServiceBusMessage($"event #{i} [{id}]"));
-    Console.WriteLine($"PUBLISHED to topic '{topic}': event #{i} [{id}]");
-}
+    SubQueue = SubQueue.DeadLetter,
+    ReceiveMode = ServiceBusReceiveMode.PeekLock
+});
 
-Console.WriteLine();
+var dead = await receiver.ReceiveMessagesAsync(maxMessages: 10, maxWaitTime: TimeSpan.FromSeconds(5));
+Console.WriteLine($"Dead-lettered messages: {dead.Count}\n");
 
-
-var drain1 = CreateDrainSubscriptionTask("drainer1", topic, subscriptions, client);
-var drain2 = CreateDrainSubscriptionTask("drainer2", topic, subscriptions, client);
-await Task.WhenAll(drain1, drain2);
-
-static async Task CreateDrainSubscriptionTask(string subscriber, string topic, string[] subscriptions, ServiceBusClient client)
+foreach (var msg in dead)
 {
-    // --- Drain each subscription independently ---
-    foreach (var sub in subscriptions)
-    {
-        await using var receiver = client.CreateReceiver(topic, sub,
-            new ServiceBusReceiverOptions { ReceiveMode = ServiceBusReceiveMode.ReceiveAndDelete });
-
-        while (true)
-        {
-            var messages = await receiver.ReceiveMessagesAsync(maxMessages: 1, maxWaitTime: TimeSpan.FromSeconds(2));
-            if (messages.Count == 0) break;
-
-            Console.WriteLine($"[{subscriber}]: SUBSCRIPTION '{sub}' received {messages.Count} message(s):");
-            foreach (var msg in messages)
-                Console.WriteLine($"   - {msg.Body}");
-            Console.WriteLine();
-        }
-    }
+    var evt = msg.Body.ToObjectFromJson<OrderEvent>();
+    Console.WriteLine($"- {evt.CustomerName} [{evt.OrderId}]");
+    Console.WriteLine($"  DeliveryCount : {msg.DeliveryCount}");
+    Console.WriteLine($"  Reason        : {msg.DeadLetterReason}");
+    Console.WriteLine($"  Description   : {msg.DeadLetterErrorDescription}");
+    Console.WriteLine();
 }
