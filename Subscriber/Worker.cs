@@ -58,24 +58,10 @@ public class Worker : BackgroundService
             return;
         }
 
-        _logger.LogInformation("Received {OrderId} from {Customer} (delivery #{Count})",
-                evt.OrderId, evt.CustomerName, args.Message.DeliveryCount);
+        _logger.LogInformation("Received {OrderId} from {Customer}: {Description}",
+            evt.OrderId, evt.CustomerName, evt.Description);
 
-        // SIDE EFFECT: must happen exactly once per order.
-        if (_processedOrders.Contains(evt.OrderId))
-        {
-            _logger.LogWarning("Duplicate {OrderId} from {Customer} (delivery #{Count})",
-                evt.OrderId, evt.CustomerName, args.Message.DeliveryCount);
-            await args.CompleteMessageAsync(args.Message);
-            return;
-        }
-        _logger.LogWarning("CHARGED {Customer} for order {OrderId}", evt.CustomerName, evt.OrderId);
-        _processedOrders.Add(evt.OrderId);
-
-        // TEMP EXPERIMENT (revert after): crash once, AFTER the side effect, BEFORE Complete,
-        // to force a redelivery and expose the duplicate.
-        if (args.Message.DeliveryCount == 1 && evt.CustomerName == "Globex")
-            throw new InvalidOperationException("Simulated crash after side effect");
+        // Real processing goes here. On Day 4 this becomes the AI agent.
 
         await args.CompleteMessageAsync(args.Message);
         _logger.LogInformation("Completed {OrderId}", evt.OrderId);
