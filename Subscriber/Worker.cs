@@ -1,4 +1,5 @@
 using Azure.Messaging.ServiceBus;
+using Microsoft.Agents.AI;
 using Contracts;
 using Microsoft.Extensions.AI;
 
@@ -11,6 +12,17 @@ public class Worker : BackgroundService
     private readonly ILogger<Worker> _logger;
     private ServiceBusProcessor? _processor;
     private readonly IChatClient _chatClient;
+    private readonly AIAgent _agent;
+    private readonly HashSet<Guid> _ticketedOrders = new();
+
+    private static readonly Dictionary<string, string> Tiers = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Acme Corp"] = "Premium",
+        ["Globex"] = "Standard",
+        ["Initech"] = "Standard",
+        ["Umbrella"] = "Premium",
+        ["Hooli"] = "Standard",
+    };
 
     public Worker(ServiceBusClient client, IConfiguration config, ILogger<Worker> logger, IChatClient chatClient)
     {
@@ -18,6 +30,17 @@ public class Worker : BackgroundService
         _config = config;
         _logger = logger;
         _chatClient = chatClient;
+        _agent = _chatClient.AsAIAgent(
+        instructions: """
+            You are a customer-support triage agent.
+            First, call get_customer_tier with the customer's name to find their tier.
+            Then reply with exactly one line: <Category> | <Urgency: Low/Medium/High> | <Tier>
+            Bump urgency up one level for Premium customers.
+            """,
+        tools: [AIFunctionFactory.Create(
+            GetCustomerTier,
+            name: "get_customer_tier",
+            description: "Looks up the support tier (Premium or Standard) of a customer by name.")]);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -61,19 +84,29 @@ public class Worker : BackgroundService
         }
 
         _logger.LogInformation("Received {OrderId} from {Customer}: {Description}",
-            evt.OrderId, evt.CustomerName, evt.Description);
+        evt.OrderId, evt.CustomerName, evt.Description);
 
-        // AI (Phase A): plain IChatClient call to classify the issue.
-        var prompt = $"""
-        Classify this customer support issue in exactly one line, formatted as:
-        <Category> | <Urgency: Low, Medium or High>
-        Issue: {evt.Description}
-        """;
-        var response = await _chatClient.GetResponseAsync(prompt, cancellationToken: args.CancellationToken);
-        _logger.LogInformation("Classified {OrderId} -> {Result}", evt.OrderId, response.Text?.Trim());
+        // AI (Phase B): the agent triages the issue, calling tools as it sees fit.
+        var prompt = $"Customer: {evt.CustomerName}\nIssue: {evt.Description}";
+        var triage = await _agent.RunAsync(prompt, cancellationToken: args.CancellationToken);
+        _logger.LogInformation("Triaged {OrderId} -> {Result}", evt.OrderId, triage.Text?.Trim());
+
+        // Idempotent side effect: create a ticket once per order, keyed on the OrderId we hold HERE
+        // (never routed through the LLM).
+        if (_ticketedOrders.Add(evt.OrderId))
+            _logger.LogWarning("TICKET created for {OrderId}: {Result}", evt.OrderId, triage.Text?.Trim());
+        else
+            _logger.LogInformation("Ticket for {OrderId} already exists; skipping duplicate", evt.OrderId);
 
         await args.CompleteMessageAsync(args.Message);
         _logger.LogInformation("Completed {OrderId}", evt.OrderId);
+    }
+
+    private string GetCustomerTier(string customerName)
+    {
+        var tier = Tiers.GetValueOrDefault(customerName, "Standard");
+        _logger.LogInformation("[tool] get_customer_tier({Customer}) -> {Tier}", customerName, tier);
+        return tier;
     }
 
     private Task OnErrorAsync(ProcessErrorEventArgs args)
