@@ -1,5 +1,6 @@
 using Azure.Messaging.ServiceBus;
 using Contracts;
+using Microsoft.Extensions.AI;
 
 namespace Subscriber;
 
@@ -9,13 +10,14 @@ public class Worker : BackgroundService
     private readonly IConfiguration _config;
     private readonly ILogger<Worker> _logger;
     private ServiceBusProcessor? _processor;
-    private readonly HashSet<Guid> _processedOrders = new();
+    private readonly IChatClient _chatClient;
 
-    public Worker(ServiceBusClient client, IConfiguration config, ILogger<Worker> logger)
+    public Worker(ServiceBusClient client, IConfiguration config, ILogger<Worker> logger, IChatClient chatClient)
     {
         _client = client;
         _config = config;
         _logger = logger;
+        _chatClient = chatClient;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -61,7 +63,14 @@ public class Worker : BackgroundService
         _logger.LogInformation("Received {OrderId} from {Customer}: {Description}",
             evt.OrderId, evt.CustomerName, evt.Description);
 
-        // Real processing goes here. On Day 4 this becomes the AI agent.
+        // AI (Phase A): plain IChatClient call to classify the issue.
+        var prompt = $"""
+        Classify this customer support issue in exactly one line, formatted as:
+        <Category> | <Urgency: Low, Medium or High>
+        Issue: {evt.Description}
+        """;
+        var response = await _chatClient.GetResponseAsync(prompt, cancellationToken: args.CancellationToken);
+        _logger.LogInformation("Classified {OrderId} -> {Result}", evt.OrderId, response.Text?.Trim());
 
         await args.CompleteMessageAsync(args.Message);
         _logger.LogInformation("Completed {OrderId}", evt.OrderId);
