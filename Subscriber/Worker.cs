@@ -86,7 +86,7 @@ public class Worker : BackgroundService
         _logger.LogInformation("Received {OrderId} from {Customer}: {Description}",
         evt.OrderId, evt.CustomerName, evt.Description);
 
-        // AI (Phase B): the agent triages the issue, calling tools as it sees fit.
+        // The agent triages the issue, calling tools as it sees fit.
         var prompt = $"Customer: {evt.CustomerName}\nIssue: {evt.Description}";
         var triage = await _agent.RunAsync(prompt, cancellationToken: args.CancellationToken);
         _logger.LogInformation("Triaged {OrderId} -> {Result}", evt.OrderId, triage.Text?.Trim());
